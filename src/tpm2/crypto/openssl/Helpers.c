@@ -59,6 +59,7 @@
 /********************************************************************************/
 
 #include "Tpm.h"
+#include "ExpDCache_fp.h"
 #include "Helpers_fp.h"
 #include "TpmToOsslMath_fp.h"
 
@@ -389,6 +390,11 @@ ComputePrivateExponentD(
     BOOL    pOK = FALSE;
     BIGNUM *phi;
     BN_CTX *ctx;
+
+    /* query cache for previously calculated D */
+    *D = ExpDCacheFind(P, Q, E);
+    if (*D)
+        return TRUE;
     //
     // compute Phi = (p - 1)(q - 1) = pq - p - q + 1 = n - p - q + 1
     phi = BN_dup(N);
@@ -400,6 +406,10 @@ ComputePrivateExponentD(
         // Compute the multiplicative inverse d = 1/e mod Phi
         BN_set_flags(phi, BN_FLG_CONSTTIME); // phi is secret
         pOK = pOK && (*D = BN_mod_inverse(NULL, E, phi, ctx)) != NULL;
+
+        /* add result to cache */
+        if (pOK)
+            ExpDCacheAdd(P, Q, E, *D);
     }
     BN_CTX_free(ctx);
     BN_clear_free(phi);
@@ -521,7 +531,6 @@ InitOpenSSLRSAPrivateKey(OBJECT     *rsaKey,   // IN
         ERROR_RETURN(TPM_RC_BINDING);
     BN_set_flags(Q, BN_FLG_CONSTTIME); // Q is secret
 
-    // TODO(stefanb): consider caching D in the OBJECT
     if (ComputePrivateExponentD(P, Q, E, N, &D) == FALSE ||
         RSA_set0_key(key, NULL, NULL, D) != 1)
         ERROR_RETURN(TPM_RC_FAILURE);
